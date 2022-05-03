@@ -43,6 +43,7 @@ typedef struct {
 
 sem_t *semlog;
 sem_t *sem_shm;
+sem_t *sem_stats;
 
 config *shm_config;
 server *shm_server;
@@ -129,12 +130,6 @@ void inicializa(int size){
 		exit(1);
 	}
 
-  shm_stats->total_tarefas = 0;
-  shm_stats->tempo_medio = 0;
-  shm_stats->tarefas_exec = 0;
-  shm_stats->operacoes_manu = 0;
-  shm_stats->failed = 0;
-
   sem_unlink("SEMLOG");
   if((semlog = sem_open("SEMLOG" , O_CREAT|O_EXCL, 0700, 1)) == SEM_FAILED){
     perror("ERRO ao criar o semaforo log\n");
@@ -145,6 +140,14 @@ void inicializa(int size){
     perror("ERRO ao criar o semaforo da shm\n");
 		exit(1);
   }
+
+  sem_unlink("SEM_STATS");
+  if((sem_stats = sem_open("SEM_STATS" , O_CREAT|O_EXCL, 0700, 1)) == SEM_FAILED){
+    perror("ERRO ao criar o semaforo da shm\n");
+		exit(1);
+  }
+
+
   geraOutput("SHARED MEMORY, SEMAPHORES AND MUTEX CREATED");
 
 }
@@ -170,6 +173,8 @@ config leConfig(){
     }
     inicializa(a.num_edge_servers);
 
+    sem_wait(sem_shm);
+
     shm_config->num_filas = a.num_filas;
     shm_config->tempo_max_espera = a.tempo_max_espera;
     shm_config->num_edge_servers = a.num_edge_servers;
@@ -186,6 +191,17 @@ config leConfig(){
       token = strtok(NULL, ",");
       shm_server[i].segundo_vCPU = atoi(token);
     }
+
+    sem_post(sem_shm);
+    sem_wait(sem_stats);
+
+    shm_stats->total_tarefas = 0;
+    shm_stats->tempo_medio = 0;
+    shm_stats->tarefas_exec = 0;
+    shm_stats->operacoes_manu = 0;
+    shm_stats->failed = 0;
+
+    sem_post(sem_stats);
 
     fclose(fich);
     geraOutput("SHARED MEMORY FILLED");
@@ -204,6 +220,7 @@ void sigint(int signum) { // handling of CTRL-C
 }
 
 void sigtstp(int signum){
+  sem_wait(sem_stats);
   printf("=== ESTATISTICAS ===\n");
   printf("Num total de tarefas executadas: %d\n",shm_stats->total_tarefas);
   printf("Tempo medio de resposta a cada tarefa: %d\n",shm_stats->tempo_medio);
@@ -211,6 +228,7 @@ void sigtstp(int signum){
   printf("Num de operacoes de manutencao de cada EDGE SERVER : %d\n",shm_stats->operacoes_manu);
   printf("Num de tarefas que não chegaram a ser executadas: %d\n",shm_stats->failed);
 
+  sem_post(sem_stats);
   print_shared_mem();
 }
 
@@ -235,6 +253,7 @@ void *vCpu(int* p){
 }
 
 void EdgeServer(){
+  sem_wait(sem_shm);
   server_thread =(pthread_t*)malloc(sizeof(pthread_t*)*shm_config->num_edge_servers*2);
   int index[shm_config->num_edge_servers*2];
   for(int i = 0 ; i < shm_config->num_edge_servers*2 ; i++){
@@ -247,6 +266,7 @@ void EdgeServer(){
   for(int i = 0 ; i < shm_config->num_edge_servers * 2 ; i++){
     pthread_join(server_thread[i],NULL);
   }
+  sem_post(sem_shm);
 }
 
 void Monitor(){
@@ -290,20 +310,9 @@ int main(){
   priority_msg my_msg;
   mqid = msgget(IPC_PRIVATE,IPC_CREAT|0700);
 
-  if(fork() == 0){
-    //printf("CRIA THREADS\n");
-    TaskManager();
-  }
-  else{
-    if(fork() == 0){
-        Monitor();
-    }
-    else{
-      if(fork() == 0){
-        Maintence();
-      }
-    }
-  }
+  if(fork() == 0) TaskManager();
+  if(fork() == 0) Monitor();
+  if(fork() == 0) Maintence();
 
   signal(SIGINT , sigint);
   int teste = 1;
