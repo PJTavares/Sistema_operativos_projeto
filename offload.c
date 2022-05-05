@@ -20,6 +20,8 @@ typedef struct server_st{
   char nome_server[64];
   int primeiro_vCPU;
   int segundo_vCPU;
+  //bool ocupado1;
+  //bool ocupado2;
 } server;
 
 typedef struct {
@@ -61,6 +63,10 @@ pthread_t* server_thread;
 pthread_t scheduler;
 
 pthread_mutex_t server_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+void MobileNode() {
+  printf("por implementar");
+}
 
 void print_shared_mem(){
     printf("Num filas: %d\n",shm_config->num_filas);
@@ -106,6 +112,7 @@ void clean_resources(){
     sem_close(semlog);
     sem_unlink("SEMLOG");
 
+    unlink(PIPE_NAME);
     pthread_mutex_destroy(&server_mutex);
     geraOutput("SIMULATOR ENDING");
 
@@ -152,11 +159,11 @@ void inicializa(int size){
 
 }
 
-config leConfig(){
+config leConfig(char *filename){
     FILE* fich;
     config a;
     char aux[20];
-    if((fich = fopen("config.txt" , "r"))==NULL){
+    if((fich = fopen(filename , "r"))==NULL){
         perror("ERRO na abertuda do ficheiro config\n");
         exit(0) ;
     }
@@ -297,13 +304,28 @@ void TaskManager(){
     perror("ERRO ao criar as threads\n");
     exit(0);
   }
+  if ((fdPipe = open(PIPE_NAME, O_RDONLY)) < 0) {
+    perror("Cannot open pipe for reading: ");
+    exit(0);
+  }
 }
 
-int main(){
+int main(int argc, char *argv[]){
+  if (argc != 2) {
+    perror("./offload_simulator {ficheiro de configuração}\n");
+    exit(0);
+  }
+  unlink(PIPE_NAME);
+  
+  if ((mkfifo(PIPE_NAME, O_CREAT|O_EXCL|0600)<0) && (errno!= EEXIST)) {
+    perror("Cannot create pipe: ");
+    exit(0);
+  }
+
   signal(SIGINT,SIG_IGN);
   signal(SIGTSTP,SIG_IGN);
   geraOutput("OFFLOAD SIMULATOR STARTING");
-  leConfig();
+  leConfig(argv[1]);
   //print_shared_mem();
   EdgeServer();
 
@@ -317,7 +339,9 @@ int main(){
   signal(SIGINT , sigint);
   int teste = 1;
   while (teste) {
-    //PARA NÂO FINALIZAR LOGO DONT KNOW
+    printf("waiting...\n");
+  	sleep(60);
+  	teste++;
   }
   return 0;
 }
